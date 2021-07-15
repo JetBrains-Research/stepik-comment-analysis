@@ -44,7 +44,8 @@ class Cleaner:
             re.UNICODE,
         )
 
-    def remove_tags(self, text):
+    @staticmethod
+    def remove_tags(text):
         return BeautifulSoup(text, "lxml").text
 
     def remove_users(self, text):
@@ -56,7 +57,8 @@ class Cleaner:
     def remove_expletives(self, text):
         return self.expletives.sub("", text)
 
-    def remove_whitespace(self, text):
+    @staticmethod
+    def remove_whitespace(text):
         return " ".join(text.split())
 
     def remove_emojis(self, text):
