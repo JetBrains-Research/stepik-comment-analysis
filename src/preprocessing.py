@@ -17,9 +17,7 @@ class Cleaner:
         self.users = re.compile(r"@[\w_]+")
         self.links = re.compile(r"https?://\S+")
         self.expletives = re.compile(r"[А-яё]+@\w+")
-        self.symbols = re.compile(
-            "[%sa-z]" % re.escape(string.digits + string.punctuation)
-        )
+        self.symbols = re.compile("r[%sa-z]" % re.escape(string.digits + string.punctuation))
         self.emojis = re.compile(
             "["
             u"\U0001F600-\U0001F64F"  # emoticons

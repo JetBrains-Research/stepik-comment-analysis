@@ -4,9 +4,7 @@ PATTERN = r"\?|проблем|почему|не знаю"
 
 
 def is_question(df, pattern=PATTERN):
-    return df[df["text"].str.contains(pattern, flags=re.IGNORECASE)].reset_index(
-        drop=True
-    )
+    return df[df["text"].str.contains(pattern, flags=re.IGNORECASE)]
 
 
 def top_level_comments(df):
