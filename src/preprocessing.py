@@ -1,45 +1,26 @@
 import re
 import time
 import string
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from bs4 import BeautifulSoup
 from natasha import Segmenter, MorphVocab, NewsEmbedding, NewsMorphTagger, Doc
+from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
 
 STOPWORDS = stopwords.words("russian")
 string.punctuation += "—"
 string.punctuation += "№"
-string.punctuation = string.punctuation.replace("?", "")
-
-PATTERN = ["?", "проблема", "почему"]
 
 
 class Cleaner:
-    def __init__(self, data):
-        self.text = data
-
-    def remove_tags(self):
-        tags = re.compile(r"<.*?>")
-        self.text = tags.sub(" ", self.text)
-
-    def remove_users(self):
-        users = re.compile(r"@[\w_]+")
-        self.text = users.sub("", self.text)
-
-    def remove_links(self):
-        links = re.compile(r"https?://\S+")
-        self.text = links.sub("", self.text)
-
-    def remove_expletives(self):
-        expletives = re.compile(r"[А-яё]+@\w+")
-        self.text = expletives.sub("", self.text)
-
-    def remove_whitespace(self):
-        self.text = " ".join(self.text.split())
-
-    def remove_emojis(self):
-        emojis = re.compile(
+    def __init__(self, texts):
+        self.texts = texts
+        self.users = re.compile(r"@[\w_]+")
+        self.links = re.compile(r"https?://\S+")
+        self.expletives = re.compile(r"[А-яё]+@\w+")
+        self.symbols = re.compile(
+            "[%sa-z]" % re.escape(string.digits + string.punctuation)
+        )
+        self.emojis = re.compile(
             "["
             u"\U0001F600-\U0001F64F"  # emoticons
             u"\U0001F300-\U0001F5FF"  # symbols & pictographs
@@ -62,65 +43,73 @@ class Cleaner:
             "]+",
             re.UNICODE,
         )
-        self.text = re.sub(emojis, "", self.text)
 
-    def remove_symbols(self):
-        punctuation = re.compile("[%s]" % re.escape(string.digits + string.punctuation))
-        text_lower = self.text.lower()
-        text_lower = punctuation.sub(" ", text_lower)
-        text_lower = re.sub(r"[a-z]+", "", text_lower)
-        self.text = re.sub(r"\s+", " ", text_lower)
+    def remove_tags(self, text):
+        return BeautifulSoup(text, "lxml").text
+
+    def remove_users(self, text):
+        return self.users.sub("", text)
+
+    def remove_links(self, text):
+        return self.links.sub("", text)
+
+    def remove_expletives(self, text):
+        return self.expletives.sub("", text)
+
+    def remove_whitespace(self, text):
+        return " ".join(text.split())
+
+    def remove_emojis(self, text):
+        return self.emojis.sub("", text)
+
+    def remove_symbols(self, text):
+        text_lower = text.lower()
+        text_lower = self.symbols.sub("", text_lower)
+        text_lower = re.sub(r"\s+", " ", text_lower)
+        return text_lower
+
+    def clean_texts(self):
+        start_time = time.time()
+        cleaned_texts = []
+        for text in self.texts:
+            cleaned_text = self.remove_tags(text)
+            cleaned_text = self.remove_expletives(cleaned_text)
+            cleaned_text = self.remove_links(cleaned_text)
+            cleaned_text = self.remove_users(cleaned_text)
+            cleaned_text = self.remove_whitespace(cleaned_text)
+            cleaned_text = self.remove_emojis(cleaned_text)
+            cleaned_text = self.remove_symbols(cleaned_text)
+            cleaned_texts.append(cleaned_text)
+        print("--- clean_texts: %s seconds ---" % (time.time() - start_time))
+        return cleaned_texts
 
 
 class LemmatizerNatasha:
-    def __init__(self, data):
-        self.text = data
+    def __init__(self, texts):
+        self.texts = texts
         self.stop_words = STOPWORDS
         self.segmenter = Segmenter()
         self.morph_vocab = MorphVocab()
         self.emb = NewsEmbedding()
         self.morph_tagger = NewsMorphTagger(self.emb)
 
-    def lemmatizer(self):
-        doc = Doc(self.text)
+    def lemmatize(self, text):
+        doc = Doc(text)
         doc.segment(self.segmenter)
         doc.tag_morph(self.morph_tagger)
 
         for token in doc.tokens:
             token.lemmatize(self.morph_vocab)
-
         return [_.lemma for _ in doc.tokens if _.lemma not in self.stop_words]
 
-
-def top_level_comments(df):
-    return df[df.parent_id.isna()][["comment_id", "step_id", "text"]]
-
-
-def clean_texts(texts):
-    start_time = time.time()
-    cleaned_texts = np.array([])
-    for text in texts:
-        cleaned_text = Cleaner(text)
-        cleaned_text.remove_tags()
-        cleaned_text.remove_expletives()
-        cleaned_text.remove_links()
-        cleaned_text.remove_users()
-        cleaned_text.remove_whitespace()
-        cleaned_text.remove_emojis()
-        cleaned_text.remove_symbols()
-        cleaned_texts = np.append(cleaned_texts, cleaned_text.text)
-    print("--- clean_texts: %s seconds ---" % (time.time() - start_time))
-    return cleaned_texts
-
-
-def lemmatize_texts(texts):
-    start_time = time.time()
-    lemmatized_texts = []
-    for text in texts:
-        lemmatized_text = LemmatizerNatasha(text)
-        lemmatized_texts.append(lemmatized_text.lemmatizer())
-    print("--- lemmatize_texts: %s seconds ---" % (time.time() - start_time))
-    return lemmatized_texts
+    def lemmatize_texts(self):
+        start_time = time.time()
+        lemmatized_texts = []
+        for text in self.texts:
+            lemmatized_text = self.lemmatize(text)
+            lemmatized_texts.append(lemmatized_text)
+        print("--- lemmatize_texts: %s seconds ---" % (time.time() - start_time))
+        return lemmatized_texts
 
 
 def identity_tokenizer(tokens):
@@ -128,28 +117,11 @@ def identity_tokenizer(tokens):
 
 
 def vectorize_texts(texts):
-    start_time = time.time()
+    cleaner = Cleaner(texts)
+    cleaned_text = cleaner.clean_texts()
+    lematizer = LemmatizerNatasha(cleaned_text)
+    lemmatized_texts = lematizer.lemmatize_texts()
+
     vect = TfidfVectorizer(tokenizer=identity_tokenizer, min_df=2, lowercase=False)
-    vectorized_texts = vect.fit_transform(texts)
-    print("--- vectorized_texts: %s seconds ---" % (time.time() - start_time))
+    vectorized_texts = vect.fit_transform(lemmatized_texts)
     return vectorized_texts.toarray()
-
-
-def is_question(texts):
-    questions = []
-    questions_idx = []
-    for idx, text in enumerate(texts):
-        if any(word in PATTERN for word in text):
-            text = [word for word in text if "?" not in word]
-            if text:
-                questions.append(text)
-                questions_idx.append(idx)
-    questions_dict = {k: v for k, v in enumerate(questions_idx)}
-    return questions_dict, questions
-
-
-def get_similar_questions(vectors, treshold=0.75):
-    similarities = cosine_similarity(vectors)
-    similarities = np.triu(similarities, k=1)
-    similar_vectors = np.argwhere(similarities > treshold)
-    return similar_vectors
