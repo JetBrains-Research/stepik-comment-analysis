@@ -9,9 +9,8 @@ DATA_DIR = DATA_DIR
 COMMENTS_FILE_NAME = COMMENTS_FILE_NAME
 filepath = os.path.join(DATA_DIR, COMMENTS_FILE_NAME)
 
-# add step_id,
 STEP_ID = 6532
-THRESHOlD = 0.25
+THRESHOlD = 0.4
 NEIGHBORS = 5
 
 
@@ -22,19 +21,19 @@ def find_similar_comments(step_id: int, threshold: float, k: int):
 
     df = df_q[df_q.step_id == step_id].reset_index(drop=True)
     data = df.text.values
-    comment_id = df.comment_id.values
     print(data.size)
     vectorized_texts = vectorize_texts(data)
-    dict_questions = get_similar_questions(vectorized_texts, threshold, k)
 
-    dict_comment_id = dict()
-    for comm, s_comm in dict_questions.items():
-        dict_comment_id[comment_id[comm]] = comment_id[s_comm].tolist()
-        print("\nВопрос:")
-        print(data[comm])
-        print("\nПохожие вопросы:")
-        print(*data[s_comm], sep="\n")
-    return dict_comment_id
+    top_k_index, top_k_dist = get_similar_questions(vectorized_texts, threshold, k)
+    col_dist = [f"dist_{i}" for i in range(k)]
+    col_top_k = [f"topk_{i}" for i in range(k)]
+    df[col_top_k] = top_k_index
+    df[col_dist] = top_k_dist
+
+    for i, top_k in enumerate(col_top_k):
+        df = df.join(df[["text", top_k]], on=top_k, rsuffix=f"_{i}")
+    df = df.drop(col_top_k + [f"topk_{i}_{i}" for i in range(k)], axis=1)
+    return df
 
 
 if __name__ == "__main__":
