@@ -47,9 +47,7 @@ def combine_methods(step_id, k, threshold_tfidf, threshold_bert):
     cols.extend([f"comment_id_{i}" for i in range(k)])
     df_tfidf = find_similar_comments(step_id, threshold_tfidf, k, "tfidf")
     df_bert = find_similar_comments(step_id, threshold_bert, k, "bert")
-    df = df_bert[cols].merge(
-        df_tfidf[cols], on=["step_id", "comment_id"], suffixes=("_bert", "_tfidf")
-    )
+    df = df_bert[cols].merge(df_tfidf[cols], on=["step_id", "comment_id"], suffixes=("_bert", "_tfidf"))
     return df
 
 
