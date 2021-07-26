@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
 
-model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
+model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
 model.eval()
 
 STOPWORDS = stopwords.words("russian")
