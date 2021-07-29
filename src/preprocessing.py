@@ -3,8 +3,12 @@ import time
 import string
 from bs4 import BeautifulSoup
 from natasha import Segmenter, MorphVocab, NewsEmbedding, NewsMorphTagger, Doc
+from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
+
+model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
+model.eval()
 
 STOPWORDS = stopwords.words("russian")
 string.punctuation += "—"
@@ -12,12 +16,15 @@ string.punctuation += "№"
 
 
 class Cleaner:
-    def __init__(self, texts):
+    def __init__(self, texts, method=None):
         self.texts = texts
+        self.method = method
         self.users = re.compile(r"@[\w_]+")
         self.links = re.compile(r"https?://\S+")
         self.expletives = re.compile(r"[А-яё]+@\w+")
-        self.symbols = re.compile(r"[%sa-z]" % re.escape(string.digits + string.punctuation))
+        self.symbols = re.compile(r"[%s]" % re.escape(string.punctuation))
+        self.english = re.compile(r"[A-z]")
+        self.digits = re.compile(r"[%s]" % re.escape(string.digits))
         self.emojis = re.compile(
             "["
             u"\U0001F600-\U0001F64F"  # emoticons
@@ -57,29 +64,48 @@ class Cleaner:
 
     @staticmethod
     def remove_whitespace(text):
+        text = text.replace(u"\ufeff", "")
         return " ".join(text.split())
 
     def remove_emojis(self, text):
         return self.emojis.sub("", text)
 
+    def remove_english(self, text):
+        return self.english.sub("", text)
+
+    def remove_digits(self, text):
+        return self.digits.sub("", text)
+
     def remove_symbols(self, text):
         text_lower = text.lower()
-        text_lower = self.symbols.sub("", text_lower)
+        text_lower = self.symbols.sub(" ", text_lower)
         text_lower = re.sub(r"\s+", " ", text_lower)
         return text_lower
 
     def clean_texts(self):
         start_time = time.time()
         cleaned_texts = []
-        for text in self.texts:
-            cleaned_text = self.remove_tags(text)
-            cleaned_text = self.remove_expletives(cleaned_text)
-            cleaned_text = self.remove_links(cleaned_text)
-            cleaned_text = self.remove_users(cleaned_text)
-            cleaned_text = self.remove_whitespace(cleaned_text)
-            cleaned_text = self.remove_emojis(cleaned_text)
-            cleaned_text = self.remove_symbols(cleaned_text)
-            cleaned_texts.append(cleaned_text)
+        if self.method == "bert":
+            for text in self.texts:
+                cleaned_text = self.remove_tags(text)
+                cleaned_text = self.remove_expletives(cleaned_text)
+                cleaned_text = self.remove_links(cleaned_text)
+                cleaned_text = self.remove_users(cleaned_text)
+                cleaned_text = self.remove_symbols(cleaned_text)
+                cleaned_text = self.remove_whitespace(cleaned_text)
+                cleaned_texts.append(cleaned_text.strip())
+        else:
+            for text in self.texts:
+                cleaned_text = self.remove_tags(text)
+                cleaned_text = self.remove_expletives(cleaned_text)
+                cleaned_text = self.remove_links(cleaned_text)
+                cleaned_text = self.remove_users(cleaned_text)
+                cleaned_text = self.remove_whitespace(cleaned_text)
+                cleaned_text = self.remove_emojis(cleaned_text)
+                cleaned_text = self.remove_english(cleaned_text)
+                cleaned_text = self.remove_digits(cleaned_text)
+                cleaned_text = self.remove_symbols(cleaned_text)
+                cleaned_texts.append(cleaned_text.strip())
         print("--- clean_texts: %s seconds ---" % (time.time() - start_time))
         return cleaned_texts
 
@@ -125,3 +151,12 @@ def vectorize_texts(texts):
     vect = TfidfVectorizer(tokenizer=identity_tokenizer, min_df=2, lowercase=False)
     vectorized_texts = vect.fit_transform(lemmatized_texts)
     return vectorized_texts.toarray()
+
+
+def bert_texts(texts):
+    cleaner = Cleaner(texts, method="bert")
+    batch_sentences = cleaner.clean_texts()
+    start_time = time.time()
+    embeddings = model.encode(batch_sentences)
+    print("--- bert: %s seconds ---" % (time.time() - start_time))
+    return embeddings

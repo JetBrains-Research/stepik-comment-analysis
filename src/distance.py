@@ -4,6 +4,7 @@ from scipy.spatial.distance import pdist, squareform
 
 def get_similar_questions(vectors, threshold, k):
     dist = pdist(vectors, "cosine")
+    dist = np.nan_to_num(dist, nan=np.inf)
     dist = squareform(dist)
     np.fill_diagonal(dist, np.inf)
 
