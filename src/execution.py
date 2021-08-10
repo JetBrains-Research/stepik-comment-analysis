@@ -44,7 +44,7 @@ def combine_methods(df, k, threshold_tfidf, threshold_bert, cols):
     for i, idx in enumerate(comments):
         uniq_sim = np.unique(sim[i])
         uniq_sim = uniq_sim[uniq_sim >= 0]
-        split_sim = [uniq_sim[x: x + cols] for x in range(0, len(uniq_sim), cols)]
+        split_sim = [uniq_sim[x : x + cols] for x in range(0, len(uniq_sim), cols)]
         repeat_comments = np.concatenate((repeat_comments, np.tile(idx, (len(split_sim), 1))), axis=0)
         sim_comments.extend(split_sim)
 
