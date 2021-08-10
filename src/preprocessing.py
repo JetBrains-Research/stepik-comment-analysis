@@ -1,28 +1,68 @@
 import re
-import time
 import string
-from bs4 import BeautifulSoup
+from functools import reduce
+from typing import List, Callable
+
+import numpy as np
 from natasha import Segmenter, MorphVocab, NewsEmbedding, NewsMorphTagger, Doc
 from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
 
-model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
-model.eval()
-
 STOPWORDS = stopwords.words("russian")
+STOPWORDS_NOUN = ["пож", "решение", "подскажите", "проблема", "ответ", "код", "программа", "ошибка", "что"]
+ENG = ["failed", "test", "error", "wrong", "фэйл", "fail"]
 string.punctuation += "—"
 string.punctuation += "№"
+symbols = re.sub("[!,.?]", "", string.punctuation)
+
+
+class BertEmbedding:
+    def __init__(self, df):
+        self.df = df
+        self.model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
+
+    def evaluate(self):
+        if "cleaned_text" in self.df:
+            cleaned_text = self.df.cleaned_text.values
+        else:
+            cleaner = Cleaner(self.df.text.values, method="bert")
+            cleaned_text = cleaner.get_cleaned_texts()
+        embeddings = self.model.encode(cleaned_text)
+        return embeddings
+
+
+def identity_tokenizer(tokens):
+    return tokens
+
+
+class TFIDFEmbedding:
+    def __init__(self, df):
+        self.df = df
+        self.vect = TfidfVectorizer(tokenizer=identity_tokenizer, lowercase=False)
+
+    def evaluate(self):
+        if "lemmas" in self.df:
+            cleaner = Cleaner(self.df.lemmas.values, method="tfidf")
+            lemmatized_texts = cleaner.get_cleaned_texts()
+        else:
+            cleaner = Cleaner(self.df.text.values, method="tfidf")
+            cleaned_text = cleaner.get_cleaned_texts()
+            lematizer = LemmatizerNatasha(cleaned_text)
+            lemmatized_texts = lematizer.get_lemmas()
+        vectorized_texts = self.vect.fit_transform(lemmatized_texts).toarray()
+        return vectorized_texts
 
 
 class Cleaner:
-    def __init__(self, texts, method=None):
+    def __init__(self, texts, method, is_preprocessed=None):
         self.texts = texts
         self.method = method
+        self.is_preprocessed = is_preprocessed
         self.users = re.compile(r"@[\w_]+")
-        self.links = re.compile(r"https?://\S+")
         self.expletives = re.compile(r"[А-яё]+@\w+")
-        self.symbols = re.compile(r"[%s]" % re.escape(string.punctuation))
+        self.punctuation = re.compile(r"[%s]" % re.escape(string.punctuation))
+        self.symbols = re.compile(r"[%s]" % re.escape(symbols))
         self.english = re.compile(r"[A-z]")
         self.digits = re.compile(r"[%s]" % re.escape(string.digits))
         self.emojis = re.compile(
@@ -49,15 +89,8 @@ class Cleaner:
             re.UNICODE,
         )
 
-    @staticmethod
-    def remove_tags(text):
-        return BeautifulSoup(text, "lxml").text
-
     def remove_users(self, text):
         return self.users.sub("", text)
-
-    def remove_links(self, text):
-        return self.links.sub("", text)
 
     def remove_expletives(self, text):
         return self.expletives.sub("", text)
@@ -76,44 +109,49 @@ class Cleaner:
     def remove_digits(self, text):
         return self.digits.sub("", text)
 
-    def remove_symbols(self, text):
-        text_lower = text.lower()
-        text_lower = self.symbols.sub(" ", text_lower)
-        text_lower = re.sub(r"\s+", " ", text_lower)
-        return text_lower
+    def remove_punctuation(self, text):
+        text = self.punctuation.sub(" ", text.lower())
+        text = re.sub(r"\s+", " ", text)
+        return text
 
-    def clean_texts(self):
-        start_time = time.time()
-        cleaned_texts = []
-        if self.method == "bert":
-            for text in self.texts:
-                cleaned_text = self.remove_tags(text)
-                cleaned_text = self.remove_expletives(cleaned_text)
-                cleaned_text = self.remove_links(cleaned_text)
-                cleaned_text = self.remove_users(cleaned_text)
-                cleaned_text = self.remove_symbols(cleaned_text)
-                cleaned_text = self.remove_whitespace(cleaned_text)
-                cleaned_texts.append(cleaned_text.strip())
-        else:
-            for text in self.texts:
-                cleaned_text = self.remove_tags(text)
-                cleaned_text = self.remove_expletives(cleaned_text)
-                cleaned_text = self.remove_links(cleaned_text)
-                cleaned_text = self.remove_users(cleaned_text)
-                cleaned_text = self.remove_whitespace(cleaned_text)
-                cleaned_text = self.remove_emojis(cleaned_text)
-                cleaned_text = self.remove_english(cleaned_text)
-                cleaned_text = self.remove_digits(cleaned_text)
-                cleaned_text = self.remove_symbols(cleaned_text)
-                cleaned_texts.append(cleaned_text.strip())
-        print("--- clean_texts: %s seconds ---" % (time.time() - start_time))
-        return cleaned_texts
+    def remove_symbols(self, text):
+        text = self.symbols.sub(" ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text
+
+    def get_base_cleaners(self) -> List[Callable]:
+        return [
+            self.remove_expletives,
+            self.remove_users,
+            self.remove_emojis,
+            self.remove_symbols,
+            self.remove_whitespace,
+        ]
+
+    def get_tfidf_cleaners(self) -> List[Callable]:
+        return [
+            self.remove_expletives,
+            self.remove_users,
+            self.remove_whitespace,
+            self.remove_emojis,
+            self.remove_english,
+            self.remove_digits,
+            self.remove_punctuation,
+        ]
+
+    def get_cleaned_texts(self):
+        cleaned_text = []
+        cleaners = self.get_tfidf_cleaners() if self.method == "tfidf" else self.get_base_cleaners()
+        cleaned_text += [reduce(lambda t, c: c(t), cleaners, text).strip() for text in self.texts]
+        return cleaned_text
 
 
 class LemmatizerNatasha:
     def __init__(self, texts):
         self.texts = texts
-        self.stop_words = STOPWORDS
+        self.stopwords = STOPWORDS
+        self.stopwords_noun = STOPWORDS_NOUN
+        self.eng = ENG
         self.segmenter = Segmenter()
         self.morph_vocab = MorphVocab()
         self.emb = NewsEmbedding()
@@ -126,37 +164,36 @@ class LemmatizerNatasha:
 
         for token in doc.tokens:
             token.lemmatize(self.morph_vocab)
-        return [_.lemma for _ in doc.tokens if _.lemma not in self.stop_words]
+        return np.array([(_.lemma, _.pos) for _ in doc.tokens if _.lemma not in self.stopwords])
 
     def lemmatize_texts(self):
-        start_time = time.time()
-        lemmatized_texts = []
+        lemmas_pos = []
         for text in self.texts:
             lemmatized_text = self.lemmatize(text)
-            lemmatized_texts.append(lemmatized_text)
-        print("--- lemmatize_texts: %s seconds ---" % (time.time() - start_time))
-        return lemmatized_texts
+            lemmas_pos.append(lemmatized_text)
+        return lemmas_pos
 
+    def get_questions_lemmas(self):
+        lemmas_pos = self.lemmatize_texts()
+        noun_texts = []
+        lemmas_texts = []
+        for i in lemmas_pos:
+            words = i[:, 0]
+            pos = i[:, 1]
+            noun_text = words[
+                (np.isin(words, self.eng))
+                | (pos == "NOUN") & (~np.isin(words, self.stopwords_noun)) & (np.char.str_len(words) > 1)
+            ]
+            text = " ".join(words)
+            noun_texts.append(noun_text.size > 1)
+            lemmas_texts.append(text)
+        return noun_texts, lemmas_texts
 
-def identity_tokenizer(tokens):
-    return tokens
-
-
-def vectorize_texts(texts):
-    cleaner = Cleaner(texts)
-    cleaned_text = cleaner.clean_texts()
-    lematizer = LemmatizerNatasha(cleaned_text)
-    lemmatized_texts = lematizer.lemmatize_texts()
-
-    vect = TfidfVectorizer(tokenizer=identity_tokenizer, min_df=2, lowercase=False)
-    vectorized_texts = vect.fit_transform(lemmatized_texts)
-    return vectorized_texts.toarray()
-
-
-def bert_texts(texts):
-    cleaner = Cleaner(texts, method="bert")
-    batch_sentences = cleaner.clean_texts()
-    start_time = time.time()
-    embeddings = model.encode(batch_sentences)
-    print("--- bert: %s seconds ---" % (time.time() - start_time))
-    return embeddings
+    def get_lemmas(self):
+        lemmas_pos = self.lemmatize_texts()
+        lemmas_texts = []
+        for i in lemmas_pos:
+            words = i[:, 0]
+            text = " ".join(words)
+            lemmas_texts.append(text)
+        return lemmas_texts
