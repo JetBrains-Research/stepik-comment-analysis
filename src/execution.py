@@ -10,6 +10,9 @@ warnings.filterwarnings("ignore", category=UserWarning, module="bs4")
 
 def find_similar_comments(df, threshold, k, embedding, return_dist=True):
     comments = df.comment_id.values
+    step = df.step_id.values
+    q = df.is_question.values
+
     if embedding == "bert":
         bert = BertEmbedding(df)
         vectorized_texts = bert.evaluate()
@@ -19,15 +22,16 @@ def find_similar_comments(df, threshold, k, embedding, return_dist=True):
     else:
         raise Exception("The wrong method to get embeddings. Use 'bert' or 'tfidf'")
 
-    top_k_index, top_k_dist = get_similar_questions(vectorized_texts, threshold, k)
+    Q = vectorized_texts[q]
+    top_k_index, top_k_dist = get_similar_questions(Q, vectorized_texts, threshold, k)
     comm_idx = np.append(comments, -1)[top_k_index]
 
     df_similarity = pd.DataFrame(comm_idx).add_prefix("comment_")
     if return_dist:
         df_dist = pd.DataFrame(top_k_dist).add_prefix("dist_")
         df_similarity = pd.concat([df_dist, df_similarity], axis=1)
-    df_similarity.insert(0, "id", comments)
-    df_similarity.insert(0, "step_id", df.step_id.values)
+    df_similarity.insert(0, "id", comments[q])
+    df_similarity.insert(0, "step_id", step[q])
     return df_similarity
 
 

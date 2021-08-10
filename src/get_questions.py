@@ -9,15 +9,17 @@ def is_question(df):
         use_problem = df["use_problem"].values
     else:
         use_problem = np.full(df.shape[0], True)
-    mask = Comments(comments, use_problem).question()
-    df_q = df[mask].copy()
-    cleaner = Cleaner(df_q["text"].values, method="bert")
+
+    cleaner = Cleaner(comments, method="bert")
     cleaned_text = cleaner.get_cleaned_texts()
+
+    mask = Comments(comments, use_problem).question()
     mask_noun, lemmas = LemmatizerNatasha(cleaned_text).get_questions_lemmas()
-    df_q["cleaned_text"] = cleaned_text
-    df_q["lemmas"] = lemmas
-    df_q = df_q[mask_noun]
-    return df_q.reset_index(drop=True)
+
+    df["cleaned_text"] = cleaned_text
+    df["lemmas"] = lemmas
+    df["is_question"] = mask
+    return df[mask_noun].sort_values("is_question", ascending=False).reset_index(drop=True)
 
 
 def top_level_comments(df):
