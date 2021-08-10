@@ -10,7 +10,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
 
 STOPWORDS = stopwords.words("russian")
-STOPWORDS_NOUN = ["пож", "решение", "подскажите", "проблема", "ответ", "код", "программа", "ошибка", "что"]
+STOPWORDS_NOUN = ["пож", "решение", "подскажите", "проблема", "код", "программа", "ошибка", "что"]
+
 ENG = ["failed", "test", "error", "wrong", "фэйл", "fail"]
 string.punctuation += "—"
 string.punctuation += "№"
@@ -55,10 +56,9 @@ class TFIDFEmbedding:
 
 
 class Cleaner:
-    def __init__(self, texts, method, is_preprocessed=None):
+    def __init__(self, texts, method):
         self.texts = texts
         self.method = method
-        self.is_preprocessed = is_preprocessed
         self.users = re.compile(r"@[\w_]+")
         self.expletives = re.compile(r"[А-яё]+@\w+")
         self.punctuation = re.compile(r"[%s]" % re.escape(string.punctuation))
@@ -170,6 +170,8 @@ class LemmatizerNatasha:
         lemmas_pos = []
         for text in self.texts:
             lemmatized_text = self.lemmatize(text)
+            if not lemmatized_text.size:
+                lemmatized_text = np.array([["", ""]])
             lemmas_pos.append(lemmatized_text)
         return lemmas_pos
 
@@ -180,12 +182,13 @@ class LemmatizerNatasha:
         for i in lemmas_pos:
             words = i[:, 0]
             pos = i[:, 1]
-            noun_text = words[
-                (np.isin(words, self.eng))
-                | (pos == "NOUN") & (~np.isin(words, self.stopwords_noun)) & (np.char.str_len(words) > 1)
-            ]
             text = " ".join(words)
-            noun_texts.append(noun_text.size > 1)
+            noun_text = words[
+                (any([substr in text for substr in self.eng]) | (pos == "NOUN"))
+                & (~np.isin(words, self.stopwords_noun))
+                & (np.char.str_len(words) > 1)
+            ]
+            noun_texts.append(noun_text.size > 0)
             lemmas_texts.append(text)
         return noun_texts, lemmas_texts
 
