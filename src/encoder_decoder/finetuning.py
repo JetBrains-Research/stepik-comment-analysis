@@ -1,4 +1,3 @@
-from config import Config
 import os
 import torch
 import torch.nn.functional as F
@@ -7,7 +6,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm, trange
 from transformers import AutoTokenizer, set_seed
 
-from encoder_decoder import EncoderDecoderModel
+from src.encoder_decoder.config import Config
+from src.encoder_decoder.encoder_decoder import EncoderDecoderModel
 
 
 def encode_data(data, tokenizer, max_length):
