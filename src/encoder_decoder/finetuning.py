@@ -1,22 +1,16 @@
+from config import Config
 import os
-
 import torch
 import torch.nn.functional as F
 from datasets import DatasetDict
 from torch.utils.data import DataLoader
 from tqdm import tqdm, trange
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, set_seed
 
 from encoder_decoder import EncoderDecoderModel
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-batch_size = 4
-train_size = 0.85
-max_length = 256
-
-
-def encode_data(data, tokenizer):
+def encode_data(data, tokenizer, max_length):
     inputs = tokenizer(data["question"], padding="max_length", truncation=True, max_length=max_length)
     outputs = tokenizer(data["answer"], padding="max_length", truncation=True, max_length=max_length)
 
@@ -38,27 +32,31 @@ def calculate_loss(outputs, targets, batch):
     return loss.sum() / batch
 
 
-def train_model(input_path="data"):
-    model_checkpoint = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-    raw_datasets = DatasetDict.from_csv(
-        {"train": os.path.join(input_path, "df_train.csv"), "val": os.path.join(input_path, "df_eval.csv")}
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
-    model = EncoderDecoderModel(model_checkpoint)
+def train_model(config):
+    set_seed(config.seed)
 
-    raw_datasets = raw_datasets.map(lambda x: encode_data(x, tokenizer))
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
+    model = EncoderDecoderModel(num_hidden_layers=config.num_hidden_layers)
+    model.to(device)
+    model.train()
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+
+    raw_datasets = DatasetDict.from_csv(
+        {
+            "train": os.path.join(config.input_path, "df_train.csv"),
+            "val": os.path.join(config.input_path, "df_eval.csv"),
+        }
+    )
+    raw_datasets = raw_datasets.map(lambda x: encode_data(x, tokenizer, config.max_length))
     raw_datasets.set_format(
         type="torch", columns=["input_ids", "attention_mask", "decoder_input_ids", "decoder_attention_mask"]
     )
 
-    dataloaders = {x: DataLoader(raw_datasets[x], batch_size=batch_size, shuffle=True) for x in ["train", "val"]}
+    dataloaders = {x: DataLoader(raw_datasets[x], batch_size=config.batch_size, shuffle=True) for x in ["train", "val"]}
 
-    model.to(device)
-    model.train()
-
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=1e-5)
-
-    train_iterator = trange(0, 2, desc="Epoch")
+    train_iterator = trange(0, config.epochs, desc="Epoch")
     iteration = 0
 
     for _ in train_iterator:
@@ -66,7 +64,7 @@ def train_model(input_path="data"):
             optimizer.zero_grad()
 
             outputs = model(batch["input_ids"].to(device))
-            loss = calculate_loss(outputs["logits"], batch["decoder_input_ids"].to(device), batch_size)
+            loss = calculate_loss(outputs["logits"], batch["decoder_input_ids"].to(device), config.batch_size)
             loss.backward()
             optimizer.step()
 
@@ -74,8 +72,6 @@ def train_model(input_path="data"):
                 print(f"loss: {loss}")
 
             iteration += 1
-
-        torch.save(model.state_dict(), os.path.join("models", "encoder_decoder_model.pt"))
 
         print("=== validation ===")
         model.eval()
@@ -86,14 +82,15 @@ def train_model(input_path="data"):
         for step, batch in enumerate(tqdm(dataloaders["val"], desc="Eval")):
             with torch.no_grad():
                 outputs = model(batch["input_ids"].to(device))
-                loss = calculate_loss(outputs["logits"], batch["decoder_input_ids"].to(device), batch_size)
+                loss = calculate_loss(outputs["logits"], batch["decoder_input_ids"].to(device), config.batch_size)
 
-                eval_loss += loss.mean().item()
+                eval_loss += loss.item()
                 eval_steps += 1
 
         eval_loss = eval_loss / eval_steps
         print("=== validation: loss ===", eval_loss)
+        torch.save(model.state_dict(), os.path.join(config.output_path, f"encoder_decoder_model_loss_{eval_loss}.pt"))
 
 
 if __name__ == "__main__":
-    train_model()
+    train_model(Config())
