@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from datasets import DatasetDict
 from torch.utils.data import DataLoader
-from tqdm import tqdm, trange
+from tqdm.auto import tqdm, trange
 from transformers import AutoTokenizer, set_seed
 
 from src.encoder_decoder.config import Config
@@ -60,7 +60,9 @@ def train_model(config):
     iteration = 0
 
     for _ in train_iterator:
-        for step, batch in enumerate(tqdm(dataloaders["train"], desc="Iteration")):
+        progressbar = tqdm(dataloaders["train"])
+        model.train()
+        for batch in progressbar:
             optimizer.zero_grad()
 
             outputs = model(batch["input_ids"].to(device))
@@ -68,18 +70,15 @@ def train_model(config):
             loss.backward()
             optimizer.step()
 
-            if iteration % 5 == 0:
-                print(f"loss: {loss}")
-
+            progressbar.desc = f"iterations (loss: {round(loss.item(), 2)})"
             iteration += 1
 
-        print("=== validation ===")
         model.eval()
-
         eval_loss = 0.0
         eval_steps = 0
 
-        for step, batch in enumerate(tqdm(dataloaders["val"], desc="Eval")):
+        progressbar_eval = tqdm(dataloaders["val"], desc="validation")
+        for batch in progressbar_eval:
             with torch.no_grad():
                 outputs = model(batch["input_ids"].to(device))
                 loss = calculate_loss(outputs["logits"], batch["decoder_input_ids"].to(device), config.batch_size)
@@ -88,7 +87,8 @@ def train_model(config):
                 eval_steps += 1
 
         eval_loss = eval_loss / eval_steps
-        print("=== validation: loss ===", eval_loss)
+        print("=== validation: loss ===", round(eval_loss, 2))
+
         torch.save(model.state_dict(), os.path.join(config.output_path, f"encoder_decoder_model_loss_{eval_loss}.pt"))
 
 

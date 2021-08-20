@@ -10,8 +10,8 @@ class Config:
 
     num_hidden_layers: int = 2
 
-    learning_rate: float = 1e-8
-    weight_decay: float = 1e-5
+    learning_rate: float = 1e-3
+    weight_decay: float = 0
 
     input_path: str = "data"
     output_path: str = "models"
