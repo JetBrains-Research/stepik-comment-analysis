@@ -1,11 +1,10 @@
 import numpy as np
-from scipy.spatial.distance import pdist, squareform
+from scipy.spatial.distance import cdist, squareform
 
 
-def get_similar_questions(vectors, threshold, k):
-    dist = pdist(vectors, "cosine")
+def get_similar_questions(questions, vectors, threshold, k):
+    dist = cdist(questions, vectors, "cosine")
     dist = np.nan_to_num(dist, nan=np.inf)
-    dist = squareform(dist)
     np.fill_diagonal(dist, np.inf)
 
     top_k_index = dist.argsort(axis=-1)[:, :k]

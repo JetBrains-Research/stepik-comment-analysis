@@ -1,55 +1,58 @@
-import os
-import load_data
-import get_questions
+import numpy as np
+import pandas as pd
 from distance import get_similar_questions
-from preprocessing import bert_texts, vectorize_texts
-from config import DATA_DIR, COMMENTS_FILE_NAME
+from preprocessing import TFIDFEmbedding, BertEmbedding
 
-DATA_DIR = DATA_DIR
-COMMENTS_FILE_NAME = COMMENTS_FILE_NAME
-filepath = os.path.join(DATA_DIR, COMMENTS_FILE_NAME)
+import warnings
 
-STEP_ID = 6532
-NEIGHBORS = 5
-THRESHOLD_bert = 0.4
-THRESHOLD_tfidf = 0.36
+warnings.filterwarnings("ignore", category=UserWarning, module="bs4")
 
 
-def find_similar_comments(step_id: int, threshold: float, k: int, emb="tfidf"):
-    df_comments = load_data.load_data(filepath)
-    df_comments = get_questions.top_level_comments(df_comments)
-    df_q = get_questions.is_question(df_comments)
+def find_similar_comments(df, threshold, k, embedding, return_dist=True):
+    comments = df.comment_id.values
+    step = df.step_id.values
+    q = df.is_question.values
 
-    df = df_q[df_q.step_id == step_id].reset_index(drop=True)
-    data = df.text.values
-    print(data.size)
-
-    if emb == "bert":
-        vectorized_texts = bert_texts(data)
+    if embedding == "bert":
+        bert = BertEmbedding(df)
+        vectorized_texts = bert.evaluate()
+    elif embedding == "tfidf":
+        tfidf = TFIDFEmbedding(df)
+        vectorized_texts = tfidf.evaluate()
     else:
-        vectorized_texts = vectorize_texts(data)
+        raise Exception("The wrong method to get embeddings. Use 'bert' or 'tfidf'")
 
-    top_k_index, top_k_dist = get_similar_questions(vectorized_texts, threshold, k)
-    col_dist = [f"dist_{i}" for i in range(k)]
-    col_top_k = [f"topk_{i}" for i in range(k)]
-    df[col_top_k] = top_k_index
-    df[col_dist] = top_k_dist
+    Q = vectorized_texts[q]
+    top_k_index, top_k_dist = get_similar_questions(Q, vectorized_texts, threshold, k)
+    comm_idx = np.append(comments, -1)[top_k_index]
 
-    for i, top_k in enumerate(col_top_k):
-        df = df.join(df[["text", "comment_id", top_k]], on=top_k, rsuffix=f"_{i}")
-    df = df.drop(col_top_k + [f"topk_{i}_{i}" for i in range(k)], axis=1)
-    df["model"] = emb
-    return df
-
-
-def combine_methods(step_id, k, threshold_tfidf, threshold_bert):
-    cols = ["step_id", "comment_id"]
-    cols.extend([f"comment_id_{i}" for i in range(k)])
-    df_tfidf = find_similar_comments(step_id, threshold_tfidf, k, "tfidf")
-    df_bert = find_similar_comments(step_id, threshold_bert, k, "bert")
-    df = df_bert[cols].merge(df_tfidf[cols], on=["step_id", "comment_id"], suffixes=("_bert", "_tfidf"))
-    return df
+    df_similarity = pd.DataFrame(comm_idx).add_prefix("comment_")
+    if return_dist:
+        df_dist = pd.DataFrame(top_k_dist).add_prefix("dist_")
+        df_similarity = pd.concat([df_dist, df_similarity], axis=1)
+    df_similarity.insert(0, "id", comments[q])
+    df_similarity.insert(0, "step_id", step[q])
+    return df_similarity
 
 
-if __name__ == "__main__":
-    print(combine_methods(STEP_ID, NEIGHBORS, THRESHOLD_tfidf, THRESHOLD_bert))
+def combine_methods(df, k, threshold_tfidf, threshold_bert, cols):
+    df_tfidf = find_similar_comments(df=df, threshold=threshold_tfidf, k=k, embedding="tfidf", return_dist=False)
+    df_bert = find_similar_comments(df=df, threshold=threshold_bert, k=k, embedding="bert", return_dist=False)
+
+    df_similarity = df_bert.merge(df_tfidf, on=["id", "step_id"])
+    comments = df_similarity[["step_id", "id"]].values
+    sim = df_similarity.drop(["step_id", "id"], axis=1).values
+
+    repeat_comments = np.array([]).reshape(0, 2)
+    sim_comments = []
+    for i, idx in enumerate(comments):
+        uniq_sim = np.unique(sim[i])
+        uniq_sim = uniq_sim[uniq_sim >= 0]
+        split_sim = [uniq_sim[x : x + cols] for x in range(0, len(uniq_sim), cols)]
+        repeat_comments = np.concatenate((repeat_comments, np.tile(idx, (len(split_sim), 1))), axis=0)
+        sim_comments.extend(split_sim)
+
+    df_similarity = pd.DataFrame(sim_comments)
+    df_similarity.insert(0, "id", repeat_comments[:, 1])
+    df_similarity.insert(0, "step_id", repeat_comments[:, 0])
+    return df_similarity
